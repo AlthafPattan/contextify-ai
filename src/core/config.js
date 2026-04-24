@@ -1,44 +1,39 @@
-const { cosmiconfig } = require('cosmiconfig');
-const path = require('path');
-const fs = require('fs');
+const { cosmiconfig } = require("cosmiconfig");
+const path = require("path");
+const fs = require("fs");
 
-const MODULE_NAME = 'contextify';
+const MODULE_NAME = "contextify";
 
 const DEFAULT_CONFIG = {
   // LLM provider settings
-  provider: 'claude',
+  provider: "claude",
   model: null, // auto-detect based on provider
   apiKey: null, // reads from env if prefixed with 'env:'
 
   // Hook mode
-  mode: 'pre-commit', // 'pre-commit' | 'post-commit'
+  mode: "pre-commit", // 'pre-commit' | 'post-commit'
 
   // File scope
-  include: [
-    'src/**/*.tsx',
-    'src/**/*.ts',
-    'src/**/*.jsx',
-    'src/**/*.js',
-  ],
+  include: ["src/**/*.tsx", "src/**/*.ts", "src/**/*.jsx", "src/**/*.js"],
   exclude: [
-    '**/*.test.*',
-    '**/*.spec.*',
-    '**/*.stories.*',
-    '**/*.story.*',
-    '**/*.context.md',
-    '**/index.ts',
-    '**/index.tsx',
-    '**/index.js',
-    '**/index.jsx',
-    '**/*.d.ts',
-    '**/node_modules/**',
-    '**/dist/**',
-    '**/build/**',
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*.stories.*",
+    "**/*.story.*",
+    "**/*.context.md",
+    "**/index.ts",
+    "**/index.tsx",
+    "**/index.js",
+    "**/index.jsx",
+    "**/*.d.ts",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**",
   ],
 
   // Output
-  output: 'colocated', // 'colocated' | 'centralized'
-  outputDir: '.contexts', // only used if output === 'centralized'
+  output: "colocated", // 'colocated' | 'centralized'
+  outputDir: ".contexts", // only used if output === 'centralized'
 
   // Performance
   concurrency: 5,
@@ -57,7 +52,7 @@ const DEFAULT_CONFIG = {
 
   // Ollama settings (when provider is 'ollama')
   ollama: {
-    host: 'http://localhost:11434',
+    host: "http://localhost:11434",
   },
 };
 
@@ -67,7 +62,7 @@ const DEFAULT_CONFIG = {
  */
 function resolveApiKey(value) {
   if (!value) return null;
-  if (value.startsWith('env:')) {
+  if (value.startsWith("env:")) {
     const envVar = value.slice(4);
     return process.env[envVar] || null;
   }
@@ -79,11 +74,13 @@ function resolveApiKey(value) {
  */
 function getDefaultModel(provider) {
   const defaults = {
-    claude: 'claude-sonnet-4-20250514',
-    openai: 'gpt-4o',
-    ollama: 'llama3',
+    claude: "claude-sonnet-4-20250514",
+    openai: "gpt-4o",
+    github: "gpt-4o-mini",
+    gemini: "gemini-2.0-flash",
+    ollama: "llama3",
   };
-  return defaults[provider] || 'claude-sonnet-4-20250514';
+  return defaults[provider] || "claude-sonnet-4-20250514";
 }
 
 /**
@@ -133,10 +130,14 @@ async function loadConfig(projectRoot) {
 
   // Auto-detect API key from common env vars if not set
   if (!config.apiKey) {
-    if (config.provider === 'claude') {
+    if (config.provider === "claude") {
       config.apiKey = process.env.ANTHROPIC_API_KEY || null;
-    } else if (config.provider === 'openai') {
+    } else if (config.provider === "openai") {
       config.apiKey = process.env.OPENAI_API_KEY || null;
+    } else if (config.provider === "github") {
+      config.apiKey = process.env.GITHUB_TOKEN || null;
+    } else if (config.provider === "gemini") {
+      config.apiKey = process.env.GEMINI_API_KEY || null;
     }
     // Ollama doesn't need an API key
   }
@@ -157,27 +158,36 @@ async function loadConfig(projectRoot) {
  */
 function writeDefaultConfig(projectRoot, overrides = {}) {
   const config = { ...DEFAULT_CONFIG, ...overrides };
-  const configPath = path.join(projectRoot, '.contextifyrc');
+  const configPath = path.join(projectRoot, ".contextifyrc");
 
-  const content = JSON.stringify({
-    provider: config.provider,
-    apiKey: config.provider === 'claude'
-      ? 'env:ANTHROPIC_API_KEY'
-      : config.provider === 'openai'
-        ? 'env:OPENAI_API_KEY'
-        : undefined,
-    model: config.model || getDefaultModel(config.provider),
-    mode: config.mode,
-    include: config.include,
-    exclude: config.exclude,
-    output: config.output,
-    concurrency: config.concurrency,
-    smartDiff: config.smartDiff,
-    commitTags: config.commitTags,
-    tools: config.tools,
-  }, null, 2);
+  const content = JSON.stringify(
+    {
+      provider: config.provider,
+      apiKey:
+        config.provider === "claude"
+          ? "env:ANTHROPIC_API_KEY"
+          : config.provider === "openai"
+          ? "env:OPENAI_API_KEY"
+          : config.provider === "github"
+          ? "env:GITHUB_TOKEN"
+          : config.provider === "gemini"
+          ? "env:GEMINI_API_KEY"
+          : undefined,
+      model: config.model || getDefaultModel(config.provider),
+      mode: config.mode,
+      include: config.include,
+      exclude: config.exclude,
+      output: config.output,
+      concurrency: config.concurrency,
+      smartDiff: config.smartDiff,
+      commitTags: config.commitTags,
+      tools: config.tools,
+    },
+    null,
+    2
+  );
 
-  fs.writeFileSync(configPath, content, 'utf-8');
+  fs.writeFileSync(configPath, content, "utf-8");
   return configPath;
 }
 
