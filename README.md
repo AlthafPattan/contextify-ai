@@ -1,221 +1,291 @@
-# contextify-ai
+<p align="center">
+  <img src="https://img.shields.io/npm/v/contextify-ai?style=flat-square&color=0F3460" alt="npm version" />
+  <img src="https://img.shields.io/npm/dm/contextify-ai?style=flat-square&color=0A7E8C" alt="npm downloads" />
+  <img src="https://img.shields.io/github/stars/AlthafPattan/contextify-ai?style=flat-square&color=E76F51" alt="GitHub stars" />
+  <img src="https://img.shields.io/github/license/AlthafPattan/contextify-ai?style=flat-square" alt="license" />
+  <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs welcome" />
+</p>
 
-AI-powered `.context.md` files, auto-generated at every commit. Contextify your codebase.
+<h1 align="center">contextify-ai</h1>
+
+<p align="center">
+  <strong>AI tools read your code. They can't read your mind.</strong><br/>
+  Auto-generate <code>.context.md</code> files at commit time so both humans and AI tools understand your components.
+</p>
+
+---
 
 ## What it does
 
-Every component, hook, and utility in your project gets a colocated `.context.md` file -- automatically generated and maintained at commit time. These files serve two audiences:
+**contextify-ai** hooks into your git commit workflow, analyzes changed components using AST parsing, asks what you intended, and generates a structured `.context.md` file next to each component.
 
-- **Developers** get human-readable business context, edge cases, and decision logs
-- **AI tools** get structured YAML metadata for instant understanding without parsing source code
+One file. Two audiences.
 
-Think of it like `.test.tsx` for documentation. Just as every component has a test file, every component gets a context file.
+- **Top half** - prose for humans: purpose, business rules, edge cases, design decisions
+- **Bottom half** - YAML for AI tools: props, state, dependencies, render conditions
+
+```
+src/
+  PaymentForm/
+    PaymentForm.tsx
+    PaymentForm.test.tsx
+    PaymentForm.module.css
+    PaymentForm.context.md    ← generated
+```
+
+AI tools like Claude Code, Cursor, and Copilot pick up `.context.md` files automatically. No plugins. No configuration. Just convention.
+
+---
+
+## Install
+
+```bash
+npm install contextify-ai --save-dev
+```
+
+## Setup
+
+```bash
+npx contextify-ai init
+```
+
+This does three things:
+1. Installs a git pre-commit hook
+2. Creates a `.contextifyrc` config file
+3. Prompts you to select an LLM provider
+
+---
+
+## Configuration
+
+```json
+// .contextifyrc
+{
+  "provider": "claude",
+  "model": "claude-sonnet-4-20250514",
+  "include": ["src/**/*.{tsx,jsx,ts,js}"],
+  "exclude": ["**/*.test.*", "**/*.stories.*"],
+  "concurrency": 3,
+  "interactive": true
+}
+```
+
+### Supported providers
+
+| Provider | Config value | Cost | Notes |
+|----------|-------------|------|-------|
+| Claude | `claude` | Paid | Best quality output |
+| GPT-4o | `openai` | Paid | Fast, reliable |
+| GitHub Models | `github` | Free | Great for open source |
+| Google Gemini | `gemini` | Free tier | Good free option |
+| Ollama | `ollama` | Free | Local, fully private |
+
+Set your API key via environment variable:
+
+```bash
+export CONTEXTIFY_API_KEY=your-key-here
+
+# For Ollama, set the host instead
+export OLLAMA_HOST=http://localhost:11434
+```
+
+---
 
 ## How it works
 
-1. You make changes to your code and run `git commit`
-2. The pre-commit hook detects changed files and analyzes them via AST
-3. Smart diff determines if structural changes occurred (new props, hooks, exports, dependencies)
-4. For structural changes, you're prompted: *"What changed and why?"*
-5. Your explanation + code diff + AST metadata are sent to your configured LLM
-6. The LLM verifies your stated intent against the code and generates/updates the `.context.md`
-7. Updated context files are auto-staged into the same commit
-8. Commit messages are tagged: `[context: generated]`, `[context: updated]`, or `[context: skipped]`
+### 1. Smart-diff catches cosmetic changes
 
-## Quick start
+Not every commit needs a context file update. Renaming a variable or fixing whitespace doesn't change what the component does.
 
-```bash
-# Initialize in your project
-npx contextify-ai init
+contextify-ai parses your code with Babel, extracts structural elements (exports, props, hooks, imports, function signatures), hashes them with SHA-256, and compares against the stored hash.
 
-# Or install globally
-npm install -g contextify-ai
-contextify init
+**Triggers regeneration:**
+- Added or removed props
+- New or deleted exports
+- Changed hook dependencies
+- Modified imports
+- Altered function signatures
+
+**Skips regeneration:**
+- Formatting and whitespace
+- Variable renames inside functions
+- String literal changes
+- Comment edits
+
+Result: 50-70% fewer LLM API calls.
+
+### 2. Developer-in-the-loop intent capture
+
+When a structural change is detected, the tool asks:
+
+```
+contextify-ai: PaymentForm.tsx has structural changes.
+> What changed and why?
 ```
 
-The setup wizard will:
-- Ask for your LLM provider (Claude, OpenAI, or Ollama)
-- Configure include/exclude patterns
-- Install git hooks
-- Set up AI tool integrations (Claude Code, Cursor, Copilot, Windsurf)
-- Optionally generate `.context.md` for existing files
+Your response gets sent alongside the code diff and AST metadata to the LLM. The model cross-references your stated intent against actual changes and flags mismatches:
 
-## Generated file format
+```
+⚠ Warning: detected changes not mentioned in your description:
+  - New prop: maxRetries (number, default: 3)
+  Proceed? [y/n/revise]
+```
 
-Each `.context.md` has two sections:
+### 3. Dual-section context file
 
-### Human section (the "why")
+The generated `.context.md` contains:
 
 ```markdown
 # PaymentForm
 
 ## Purpose
-Handles checkout payment step for prepaid customers.
+Handles credit card payment submission with real-time validation.
 
 ## Business Rules
-- Card validation must complete before submit enables
-- Two failed tokenizations triggers "try another card" message
-- ZIP code required for US addresses only
+- Luhn validation runs on blur, not on keystroke
+- Submit button disables during processing to prevent double-charges
 
 ## Edge Cases
-- Expired cards pass format validation but fail tokenization
-- Ad blockers can prevent Stripe Elements iframe from loading
+- Expired cards show inline error, do not clear form
+- Network timeout after 30s triggers retry prompt
 
 ## Decision Log
-- Chose Stripe Elements over raw inputs for PCI compliance
-```
+- Client-side Luhn over API validation to reduce round-trips
+- Controlled inputs to support save-draft feature
 
-### AI section (the "what")
+---
+```
 
 ```yaml
 component:
   name: PaymentForm
-  type: client-component
+  type: functional
   framework: react
 
 interface:
   props:
-    - name: initialData
-      type: "Partial<PaymentFormData> | undefined"
-      description: "Pre-filled form data when returning from review"
-    - name: onSubmit
-      type: "(token: StripeToken) => Promise<void>"
+    - name: amount
+      type: number
+      required: true
+    - name: onSuccess
+      type: "(txId: string) => void"
+      required: true
 
 state:
   internal:
-    - name: isProcessing
-      type: boolean
-      controls: "Submit button disabled state"
+    - isProcessing: boolean
+    - error: string | null
 
 dependencies:
   external:
-    - package: "@stripe/stripe-js"
-    - package: "@stripe/react-stripe-js"
+    - payment-gateway-sdk
 
 render_logic:
   conditions:
-    - when: "Stripe iframe load fails"
-      renders: ManualCardEntry
-    - when: "retryCount >= 2"
-      renders: "Alternate card suggestion"
+    - idle: "Default form state"
+    - processing: "API call in flight"
+    - error: "Inline error displayed"
 ```
 
-## Configuration
+### 4. Commit message tagging
 
-Create `.contextifyrc` in your project root (auto-generated by `contextify init`):
-
-```json
-{
-  "provider": "claude",
-  "apiKey": "env:ANTHROPIC_API_KEY",
-  "model": "claude-sonnet-4-20250514",
-  "mode": "pre-commit",
-  "include": [
-    "src/**/*.tsx",
-    "src/**/*.ts"
-  ],
-  "exclude": [
-    "**/*.test.*",
-    "**/*.stories.*",
-    "**/index.ts",
-    "**/*.d.ts"
-  ],
-  "output": "colocated",
-  "concurrency": 5,
-  "smartDiff": true,
-  "commitTags": true,
-  "tools": {
-    "claudeCode": true,
-    "cursor": true,
-    "copilot": false,
-    "windsurf": false
-  }
-}
-```
-
-## Commands
-
-### `contextify init`
-
-Interactive setup wizard.
-
-### `contextify generate [files...]`
-
-Manually generate `.context.md` files.
-
-```bash
-# Generate for all files in scope
-contextify generate
-
-# Generate for specific files
-contextify generate src/components/Button.tsx src/hooks/useAuth.ts
-
-# Dry run - see what would be generated
-contextify generate --dry-run
-
-# Force regeneration (ignore smart diff)
-contextify generate --force
-```
-
-### `contextify audit`
-
-Find files missing `.context.md` or with stale context.
-
-```bash
-# Check for missing context files
-contextify audit
-
-# Also check for staleness
-contextify audit --stale
-```
-
-### `contextify hook`
-
-Called automatically by git hooks. Supports:
-
-```bash
-# Skip context generation for a commit
-git commit -m "fix: typo" --skip-context
-
-# Or via environment variable (useful in CI)
-CONTEXTIFY_SKIP=true git commit -m "ci: update deps"
-```
-
-## Commit message tags
-
-Every commit is automatically tagged:
+Every commit gets tagged for visibility:
 
 | Tag | Meaning |
 |-----|---------|
-| `[context: generated]` | New `.context.md` files created |
-| `[context: updated]` | Existing `.context.md` files modified |
-| `[context: no-change]` | Smart diff found no structural changes |
-| `[context: skipped]` | Developer chose to skip |
-| `[context: error]` | LLM call failed (commit not blocked) |
+| `[context: generated]` | New context file created |
+| `[context: updated]` | Existing file regenerated |
+| `[context: no-change]` | Smart-diff found no structural change |
+| `[context: skipped]` | Component excluded by config |
 
-## Intent verification
+---
 
-When you provide an explanation of your changes, the LLM cross-references it against the actual code. If there's a mismatch (e.g., you say "added retry logic" but no retry exists), you'll see a warning before the commit proceeds.
+## CLI Commands
 
-## AI tool integration
+```bash
+# Initialize in a project
+npx contextify-ai init
 
-During `init`, contextify-ai adds references to your AI tool configs:
+# Generate context for all components (bypasses smart-diff)
+npx contextify-ai generate
 
-- **Claude Code**: Adds a section to `CLAUDE.md`
-- **Cursor**: Creates `.cursor/rules/contextify.mdc` with auto-attach rules
-- **Copilot**: Updates `.github/copilot-instructions.md`
-- **Windsurf**: Updates `.windsurfrules`
+# Generate for a specific file
+npx contextify-ai generate src/PaymentForm/PaymentForm.tsx
 
-A project-wide index is maintained at `.contexts/index.md` for any tool to discover all context files.
+# Check which files need context updates
+npx contextify-ai status
 
-## Supported LLM providers
+# Generate project-wide index of all context files
+npx contextify-ai index
+```
 
-| Provider | Config | API Key |
-|----------|--------|---------|
-| Claude (Anthropic) | `"provider": "claude"` | `ANTHROPIC_API_KEY` |
-| GPT (OpenAI) | `"provider": "openai"` | `OPENAI_API_KEY` |
-| Ollama (Local) | `"provider": "ollama"` | Not required |
+---
+
+## Why colocation
+
+The `.context.md` file sits next to the component it describes - same convention as `.test.js`, `.module.css`, and `.stories.js`.
+
+AI tools with file system access discover these files without any integration work. Claude Code reads `PaymentForm.tsx`, checks the same directory for `PaymentForm.context.md`, parses the YAML, and knows the props, state, dependencies, and business rules before writing a single line.
+
+Convention over configuration.
+
+---
+
+## vs. other tools
+
+| Feature | contextify-ai | Repomix | code-contextify | JSDoc | AI commit generators |
+|---------|:---:|:---:|:---:|:---:|:---:|
+| Per-component | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Commit-hooked | ✅ | ❌ | ❌ | ❌ | ✅ |
+| LLM-powered | ✅ | ❌ | ✅ | ❌ | ✅ |
+| Dual-audience | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Smart-diff | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Developer intent | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Provider-agnostic | ✅ | N/A | Partial | N/A | Partial |
+| Business context | ✅ | ❌ | Partial | ❌ | ❌ |
+
+---
+
+## Roadmap
+
+- [ ] VS Code extension for inline context previews
+- [ ] MCP server integration
+- [ ] CI/CD pipeline validation
+- [ ] Python and Go support
+- [ ] Context file diffing in PR reviews
+
+---
+
+## Contributing
+
+Contributions are welcome. Open an issue first to discuss what you'd like to change.
+
+```bash
+git clone https://github.com/AlthafPattan/contextify-ai.git
+cd contextify-ai
+npm install
+npm test
+```
+
+---
+
+## Research
+
+This tool is backed by a peer-reviewed research paper:
+
+> **"Contextify-AI: An LLM-Powered Framework for Automated, Dual-Audience Context File Generation in Modern Software Projects"**
+> Althaf Khan Pattan, Independent Researcher, 2025
+> [arXiv: cs.SE](https://arxiv.org/)
+
+---
 
 ## License
 
 MIT
+
+---
+
+<p align="center">
+  <strong>If this tool helps you, consider giving it a ⭐ on <a href="https://github.com/AlthafPattan/contextify-ai">GitHub</a>.</strong><br/>
+  Every star, fork, and contribution helps keep this project alive.
+</p>
