@@ -1,14 +1,21 @@
 {
   "name": "contextify-ai",
-  "version": "0.1.0",
+  "author": "Althaf Pattan",
+  "version": "0.3.0",
   "description": "AI-powered .context.md files, auto-generated at every commit. Contextify your codebase.",
   "main": "src/index.js",
   "bin": {
-    "contextify": "./bin/contextify.js"
+    "contextify": "./bin/contextify.js",
+    "contextify-ai": "./bin/contextify.js"
   },
   "scripts": {
     "test": "node test/run.js",
-    "lint": "echo 'No linter configured yet'"
+    "init": "node bin/contextify.js init",
+    "generate": "node bin/contextify.js generate",
+    "generate:dry-run": "node bin/contextify.js generate --dry-run",
+    "generate:force": "node bin/contextify.js generate --force",
+    "audit": "node bin/contextify.js audit",
+    "audit:stale": "node bin/contextify.js audit --stale"
   },
   "keywords": [
     "ai",
@@ -19,13 +26,18 @@
     "llm",
     "claude",
     "openai",
+    "gemini",
+    "ollama",
+    "github-models",
     "developer-tools",
     "code-context",
     "react",
     "angular",
-    "vue"
+    "vue",
+    "ast",
+    "smart-diff",
+    "context-engineering"
   ],
-  "author": "",
   "license": "MIT",
   "dependencies": {
     "@babel/parser": "^7.24.0",
@@ -44,11 +56,16 @@
   },
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/AlthafPattan/contextify-ai.git"
+  },
+  "homepage": "https://github.com/AlthafPattan/contextify-ai#readme",
+  "bugs": {
+    "url": "https://github.com/AlthafPattan/contextify-ai/issues"
   },
   "files": [
     "bin/",
     "src/",
-    "templates/"
+    "README.md",
+    "LICENSE"
   ]
 }
