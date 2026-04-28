@@ -560,9 +560,8 @@ Convention over configuration.
 
 This tool is backed by a research paper:
 
-> **"Contextify-AI: An LLM-Powered Framework for Automated, Dual-Audience Context File Generation in Modern Software Projects"**
-> Althaf Khan Pattan, Independent Researcher, 2025
-> [arXiv: cs.SE](https://arxiv.org/)
+> **"Automated Context Generation for AI Code Assistants: An LLM-Powered Framework for Developer Intent Capture and Documentation Automation"**
+> Althaf Khan Pattan, Independent Researcher, 2026
 
 ---
 
