@@ -6,7 +6,7 @@ const MODULE_NAME = "contextify";
 
 const DEFAULT_CONFIG = {
   // LLM provider settings
-  provider: "claude",
+  provider: "github",
   model: null, // auto-detect based on provider
   apiKey: null, // reads from env if prefixed with 'env:'
 
