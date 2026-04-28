@@ -58,7 +58,6 @@
     "type": "git",
     "url": "git+https://github.com/AlthafPattan/contextify-ai.git"
   },
-  "homepage": "https://github.com/AlthafPattan/contextify-ai#readme",
   "bugs": {
     "url": "https://github.com/AlthafPattan/contextify-ai/issues"
   },

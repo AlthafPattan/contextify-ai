@@ -7,6 +7,8 @@ const { initCommand } = require('../src/cli/init');
 const { generateCommand } = require('../src/cli/generate');
 const { auditCommand } = require('../src/cli/audit');
 const { hookHandler } = require('../src/cli/hook');
+const { resetCommand } = require('../src/cli/reset');
+const { regenCommand } = require('../src/cli/regen');
 
 const program = new Command();
 
@@ -47,6 +49,22 @@ program
   .description('Run from git pre-commit/post-commit hook. Not intended to be called directly.')
   .option('--skip-context', 'Skip context generation for this commit')
   .option('--post-commit', 'Run in post-commit mode (uses commit message as intent)')
+  .option('-m, --message <message>', 'Developer note on what changed and why (feeds the LLM for richer use cases and edge cases)')
   .action(hookHandler);
+
+// ── reset ─────────────────────────────────────────────
+program
+  .command('reset [files...]')
+  .description('Delete .context.md files for specific source files, or all of them if no files given.')
+  .option('--force', 'Skip confirmation prompt', false)
+  .action(resetCommand);
+
+// ── regen ─────────────────────────────────────────────
+program
+  .command('regen [files...]')
+  .description('Force-regenerate .context.md files, preserving existing edge cases and conditions.')
+  .option('-m, --message <message>', 'What changed and why (fed to the LLM to focus edge case updates)')
+  .option('--concurrency <n>', 'Max parallel LLM calls', '5')
+  .action(regenCommand);
 
 program.parse();

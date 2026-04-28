@@ -84,18 +84,21 @@ Running `contextify init` creates a `.contextifyrc` file in your project root:
   "model": "llama3",
   "mode": "pre-commit",
   "include": [
-    "src/**/*.tsx",
-    "src/**/*.ts",
-    "src/**/*.jsx",
-    "src/**/*.js"
+    "**/index.ts",
+    "**/index.tsx",
+    "**/index.js",
+    "**/index.jsx"
   ],
   "exclude": [
     "**/*.test.*",
     "**/*.spec.*",
     "**/*.stories.*",
-    "**/index.ts",
-    "**/index.tsx",
-    "**/*.d.ts"
+    "**/*.story.*",
+    "**/*.context.md",
+    "**/*.d.ts",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/build/**"
   ],
   "output": "colocated",
   "concurrency": 5,
@@ -138,7 +141,7 @@ Result: 50-70% fewer LLM calls.
 
 ### 2. Developer-in-the-Loop Intent Capture
 
-When structural changes are detected, the pre-commit hook prompts you:
+When structural changes are detected, the pre-commit hook prompts you interactively:
 
 ```
 ┌─ contextify-ai ─────────────────────────────
@@ -152,7 +155,27 @@ When structural changes are detected, the pre-commit hook prompts you:
 └──────────────────────────────────────────────
 ```
 
-Your explanation gets sent alongside the code diff and AST metadata to the LLM. The model cross-references your stated intent against the actual code and flags mismatches:
+You can also pass the message directly via the `--message` flag (skips the interactive prompt — useful in scripts or IDE integrations):
+
+```bash
+contextify hook --message "added retry logic with exponential backoff, max 3 attempts"
+# or short form
+contextify hook -m "added retry logic with exponential backoff, max 3 attempts"
+```
+
+When a message is provided, the terminal shows it inline instead of prompting:
+
+```
+┌─ contextify-ai ─────────────────────────────
+│
+│  ~ update  src/components/PaymentForm.tsx
+│
+│  context: added retry logic with exponential backoff, max 3 attempts
+│
+└──────────────────────────────────────────────
+```
+
+Your explanation is sent alongside the code and AST metadata to the LLM. The model uses it as the **primary source** for updating edge cases, business rules, and decision log — then cross-references against the actual code and flags mismatches:
 
 ```
 ┌─ contextify-ai ─────────────────────────────
@@ -169,36 +192,61 @@ Your explanation gets sent alongside the code diff and AST metadata to the LLM. 
 └──────────────────────────────────────────────
 ```
 
-### 3. Dual-Section Context File
+### 3. Generated Context File Format
 
-Each `.context.md` has a human section and an AI section:
+Each `.context.md` has two halves: a human-readable section and a structured AI section.
 
-**Human section (the "why"):**
+**Human section** — seven required sections, always in this order:
 
 ```markdown
 # PaymentForm
 
 ## Purpose
-Handles credit card payment submission with client-side validation
-and Stripe tokenization.
+<!-- source: developer -->
+Exists to isolate all Stripe tokenization logic from the checkout flow,
+so payment errors don't propagate upward and corrupt order state.
 
-## Business Rules
-- Card validation must complete before submit enables
-- Two failed tokenizations triggers "try another card" message
-- ZIP code required for US addresses only
+## Functional Logic
+<!-- source: ai -->
+* PaymentForm — collects card details, validates client-side, and calls onSubmit with a Stripe token
+* CardField (sub-component) — renders the Stripe Elements iframe; replaced by ManualCardEntry if the iframe fails to load
+* validateCard (helper) — runs Luhn check and expiry check before tokenization is attempted
+* isProcessing state — set to true on submit, disables the button and shows a spinner, reset on success or error
+* retryCount state — increments on each tokenization failure; at 2 triggers the alternate card message
+* Data flow: props (initialData, onSubmit) → form state → validateCard → Stripe tokenize → onSubmit callback
+
+## Business Context
+<!-- source: developer -->
+Payment is the final step before order confirmation. Any failure here must be surfaced clearly
+without losing the user's cart. The component owns error recovery so the parent checkout page
+stays stateless with respect to payment status.
+
+## Use Cases
+<!-- source: developer+ai -->
+* **[dev]** When a returning user has pre-filled billing data, initialData hydrates the form fields on mount
+* When the user submits, card details are validated client-side before any network call is made
+* When retryCount reaches 2, an alternate card suggestion message replaces the standard error
 
 ## Edge Cases
-- Expired cards pass format validation but fail tokenization
-- Ad blockers can prevent Stripe Elements iframe from loading
+<!-- source: developer+ai -->
+* **[dev]** Expired cards pass format validation but fail at the Stripe tokenization step — the error is caught and retryCount is incremented
+* Ad blockers can prevent the Stripe Elements iframe from loading — ManualCardEntry is shown as fallback
+
+## Watch Out
+<!-- source: developer+ai -->
+* **[dev]** Do not call onSubmit directly — always go through the internal handleSubmit which guards against double-submission
+* isProcessing is not reset on unmount; if the parent unmounts mid-flight a setState-on-unmounted-component warning will fire
+* ZIP code field visibility depends on customerType from useCheckoutContext — removing that context provider silently hides the field
 
 ## Decision Log
-- Chose Stripe Elements over raw inputs for PCI compliance
-- Client-side Luhn over API validation to reduce round-trips
+<!-- source: developer+ai -->
+* **[dev]** Chose Stripe Elements over raw card inputs to keep the form out of PCI scope
+* Client-side Luhn check added to reduce unnecessary tokenization round-trips on obviously invalid numbers
 ```
 
-**AI section (the "what"):**
+**AI section** — structured metadata in a plain code block:
 
-```yaml
+```
 component:
   name: PaymentForm
   type: component
@@ -207,46 +255,77 @@ component:
 interface:
   props:
     - name: initialData
-      type: "Partial<PaymentFormData> | undefined"
+      type: Partial<PaymentFormData> | undefined
       optional: true
-      description: "Pre-filled form data when returning from review"
+      description: Pre-filled form data when returning from review
     - name: onSubmit
-      type: "(token: StripeToken) => Promise<void>"
+      type: (token: StripeToken) => Promise<void>
       optional: false
-      description: "Callback with tokenized payment data"
+      description: Callback invoked with the tokenized payment data
+  returns:
+    type: JSX.Element
+    description: The rendered payment form
 
 state:
   internal:
     - name: isProcessing
       type: boolean
-      controls: "Submit button disabled state and loading indicator"
+      controls: Disables submit button and shows loading spinner during tokenization
     - name: retryCount
       type: number
-      controls: "Switches to alternate card message at count >= 2"
-
+      controls: Switches to alternate card message when value reaches 2
   external:
     - source: useCheckoutContext
       consumes: [customerType, billingAddress]
-      purpose: "Determines ZIP requirement and customer tier"
+      purpose: Determines ZIP field visibility and customer billing tier
 
 dependencies:
   internal:
     - path: ../hooks/useStripeElements
-      relationship: "Manages Stripe iframe lifecycle"
+      relationship: Manages Stripe iframe lifecycle and exposes tokenize()
   external:
     - package: "@stripe/stripe-js"
+      usage: Stripe tokenization API
 
 render_logic:
   conditions:
-    - when: "Stripe iframe load fails"
-      renders: ManualCardEntry
-    - when: "retryCount >= 2"
-      renders: "Alternate card suggestion"
-    - when: "customerType !== 'US'"
-      hides: "ZIP code field"
+    - when: Stripe iframe load fails
+      renders: ManualCardEntry fallback
+    - when: retryCount >= 2
+      renders: Alternate card suggestion message
+    - when: customerType !== US
+      hides: ZIP code field
+
+key_functions:
+  - name: handleSubmit
+    purpose: Guards against double-submission, runs validation, calls Stripe tokenize, invokes onSubmit
+    params: [FormEvent]
+    returns: void
+
+testing:
+  file: none
+  coverage_notes: No tests for the ManualCardEntry fallback path or retryCount reset on success
 ```
 
-### 4. Commit Message Tagging
+### 4. Hook Ordering — Works with Husky and lint-staged
+
+contextify-ai is designed to run **before** your lint and format steps so that generated `.context.md` files are staged and available to lint-staged before it scans the index.
+
+`contextify init` handles this automatically:
+
+- **Plain `.git/hooks`** — contextify is prepended before any existing hook content
+- **Husky** — detected automatically; contextify is prepended to `.husky/pre-commit` before the `lint-staged` call
+
+Resulting hook order:
+```sh
+#!/bin/sh
+npx contextify hook        # 1. generate + stage .context.md files
+npx lint-staged            # 2. format/lint all staged files (including .context.md)
+```
+
+If a contextify LLM call fails, it logs the error and exits cleanly — it **never blocks the commit**. Lint and format steps always run.
+
+### 5. Commit Message Tagging
 
 Every commit gets tagged automatically:
 
@@ -326,11 +405,54 @@ Output:
 Called automatically by git hooks. Not intended to be called directly, but supports flags:
 
 ```bash
-# Skip context generation for this commit
-git commit -m "fix: typo" --skip-context
+# Pass a developer message to feed the LLM (skips interactive prompt)
+contextify hook --message "refactored auth to use JWT, session edge cases no longer apply"
+contextify hook -m "added input validation; empty string now returns 400"
 
-# Or via environment variable (useful in CI)
+# Skip context generation for this commit
 CONTEXTIFY_SKIP=true git commit -m "ci: update deps"
+```
+
+### `contextify reset`
+
+Delete `.context.md` files for specific source files, or wipe the whole project. Asks for confirmation unless `--force` is passed.
+
+```bash
+# Reset a single file
+contextify reset src/components/PaymentForm.tsx
+
+# Reset the entire project (interactive confirmation)
+contextify reset
+
+# Skip confirmation (scripts / CI)
+contextify reset --force
+```
+
+The index at `.contexts/index.md` is updated automatically — deleted if nothing remains, trimmed otherwise.
+
+### `contextify regen`
+
+Force-regenerate `.context.md` files. Unlike a plain reset + generate, this passes the **existing** `.context.md` back to the LLM so it can preserve edge cases and conditions that are still accurate while updating what has changed.
+
+```bash
+# Regenerate a single file
+contextify regen src/components/PaymentForm.tsx
+
+# Regenerate everything
+contextify regen
+
+# With a message to guide the LLM on what to focus on
+contextify regen -m "switched from session tokens to JWT across the board"
+
+# Control parallel LLM calls
+contextify regen --concurrency 3
+```
+
+**Full refresh workflow** (when you want to start completely from scratch):
+
+```bash
+contextify reset --force   # delete all .context.md
+contextify regen -m "..."  # regenerate with no prior context, guided by your message
 ```
 
 ---

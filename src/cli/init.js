@@ -215,10 +215,10 @@ async function initCommand(options) {
 
 /**
  * Set up git hooks using simple shell scripts (no husky dependency).
+ * contextify must run FIRST so generated .context.md files are staged
+ * before lint/format steps pick up staged files.
  */
 async function setupGitHooks(root, mode) {
-  const hooksDir = path.join(root, ".git", "hooks");
-
   if (!fs.existsSync(path.join(root, ".git"))) {
     console.log(
       chalk.yellow("  ⚠ No .git directory found. Skipping hook setup.")
@@ -229,37 +229,70 @@ async function setupGitHooks(root, mode) {
     return;
   }
 
-  if (!fs.existsSync(hooksDir)) {
-    fs.mkdirSync(hooksDir, { recursive: true });
-  }
-
   const hookType = mode === "post-commit" ? "post-commit" : "pre-commit";
-  const hookPath = path.join(hooksDir, hookType);
   const skipFlag = mode === "post-commit" ? "--post-commit" : "";
 
   // Embed the node bin directory so the hook works in non-login shells
   // (e.g. nvm-managed node is not on PATH when git runs hooks via /bin/sh)
   const nodeBinDir = path.dirname(process.execPath);
   const pathExport = `export PATH="${nodeBinDir}:$PATH"`;
+  const contextifyBlock = `# contextify-ai (runs first: generates .context.md before lint/format)\n${pathExport}\nnpx contextify hook ${skipFlag} "$@"\n`;
 
-  // Check for existing hook
-  let existingContent = "";
-  if (fs.existsSync(hookPath)) {
-    existingContent = fs.readFileSync(hookPath, "utf-8");
-    if (existingContent.includes("contextify")) {
-      console.log(chalk.dim(`  Hook already installed in ${hookType}`));
-      return;
+  // ── Detect husky ──────────────────────────────
+  // Husky manages its own hook files under .husky/ and overrides .git/hooks.
+  // We must write into .husky/ when it's present, otherwise contextify is skipped.
+  const huskyDir = path.join(root, ".husky");
+  const huskyHookPath = path.join(huskyDir, hookType);
+  const isHusky = fs.existsSync(huskyDir);
+
+  if (isHusky) {
+    let huskyContent = "";
+    if (fs.existsSync(huskyHookPath)) {
+      huskyContent = fs.readFileSync(huskyHookPath, "utf-8");
+      if (huskyContent.includes("contextify")) {
+        console.log(chalk.dim(`  Hook already installed in .husky/${hookType}`));
+      } else {
+        // Prepend before existing steps so contextify runs before lint-staged etc.
+        const shebang = huskyContent.startsWith("#!/") ? huskyContent.split("\n")[0] + "\n" : "";
+        const body = shebang ? huskyContent.slice(shebang.length) : huskyContent;
+        fs.writeFileSync(huskyHookPath, `${shebang}\n${contextifyBlock}\n${body}`, { mode: 0o755 });
+        console.log(chalk.green(`  ✓ Prepended contextify to .husky/${hookType} (runs before lint-staged)`));
+      }
+    } else {
+      fs.writeFileSync(huskyHookPath, `#!/bin/sh\n\n${contextifyBlock}`, { mode: 0o755 });
+      console.log(chalk.green(`  ✓ Created .husky/${hookType} with contextify hook`));
+    }
+  } else {
+    // ── Plain .git/hooks ──────────────────────────
+    const hooksDir = path.join(root, ".git", "hooks");
+    if (!fs.existsSync(hooksDir)) {
+      fs.mkdirSync(hooksDir, { recursive: true });
+    }
+
+    const hookPath = path.join(hooksDir, hookType);
+    let existingContent = "";
+    if (fs.existsSync(hookPath)) {
+      existingContent = fs.readFileSync(hookPath, "utf-8");
+      if (existingContent.includes("contextify")) {
+        console.log(chalk.dim(`  Hook already installed in ${hookType}`));
+      } else {
+        // Prepend after shebang so contextify runs before any existing lint/format steps
+        const shebang = existingContent.startsWith("#!/") ? existingContent.split("\n")[0] + "\n" : "";
+        const body = shebang ? existingContent.slice(shebang.length) : existingContent;
+        fs.writeFileSync(hookPath, `${shebang}\n${contextifyBlock}\n${body}`, { mode: 0o755 });
+        console.log(chalk.green(`  ✓ Prepended contextify to ${hookType} hook (runs before lint/format)`));
+      }
+    } else {
+      fs.writeFileSync(hookPath, `#!/bin/sh\n\n${contextifyBlock}`, { mode: 0o755 });
+      console.log(chalk.green(`  ✓ Git ${hookType} hook installed`));
     }
   }
 
-  const hookScript = existingContent
-    ? `${existingContent}\n\n# contextify-ai\n${pathExport}\nnpx contextify hook ${skipFlag} "$@"\n`
-    : `#!/bin/sh\n\n# contextify-ai\n${pathExport}\nnpx contextify hook ${skipFlag} "$@"\n`;
-
-  fs.writeFileSync(hookPath, hookScript, { mode: 0o755 });
-  console.log(chalk.green(`  ✓ Git ${hookType} hook installed`));
-
   // Also set up prepare-commit-msg for tagging
+  const hooksDir = path.join(root, ".git", "hooks");
+  if (!fs.existsSync(hooksDir)) {
+    fs.mkdirSync(hooksDir, { recursive: true });
+  }
   const prepareHookPath = path.join(hooksDir, "prepare-commit-msg");
   let prepareContent = "";
   if (fs.existsSync(prepareHookPath)) {

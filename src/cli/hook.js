@@ -41,7 +41,7 @@ async function hookHandler(options) {
     if (isPostCommit) {
       await handlePostCommit(config);
     } else {
-      await handlePreCommit(config);
+      await handlePreCommit(config, options);
     }
   } catch (err) {
     // Never block the commit on error
@@ -53,7 +53,7 @@ async function hookHandler(options) {
 /**
  * Pre-commit mode: interactive prompt, LLM calls, auto-stage.
  */
-async function handlePreCommit(config) {
+async function handlePreCommit(config, options = {}) {
   // Get staged files matching scope
   const stagedFiles = await getStagedFiles(config);
 
@@ -113,11 +113,17 @@ async function handlePreCommit(config) {
 
   console.log(chalk.cyan('  │'));
 
-  // ── Prompt developer for input ────────────────
+  // ── Collect developer context ─────────────────
   let developerInput = null;
 
-  // Only prompt if stdin is a TTY (interactive terminal)
-  if (process.stdin.isTTY) {
+  if (options.message) {
+    // Message passed via --message flag: show it and skip interactive prompt
+    developerInput = options.message.trim() || null;
+    if (developerInput) {
+      console.log(chalk.cyan('  │  ') + chalk.dim('context: ') + developerInput);
+    }
+  } else if (process.stdin.isTTY) {
+    // Only prompt if stdin is a TTY (interactive terminal)
     try {
       const { input } = await inquirer.prompt([
         {

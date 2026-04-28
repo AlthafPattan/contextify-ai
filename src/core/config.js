@@ -14,17 +14,18 @@ const DEFAULT_CONFIG = {
   mode: "pre-commit", // 'pre-commit' | 'post-commit'
 
   // File scope
-  include: ["src/**/*.tsx", "src/**/*.ts", "src/**/*.jsx", "src/**/*.js"],
+  include: [
+    "**/index.ts",
+    "**/index.tsx",
+    "**/index.js",
+    "**/index.jsx",
+  ],
   exclude: [
     "**/*.test.*",
     "**/*.spec.*",
     "**/*.stories.*",
     "**/*.story.*",
     "**/*.context.md",
-    "**/index.ts",
-    "**/index.tsx",
-    "**/index.js",
-    "**/index.jsx",
     "**/*.d.ts",
     "**/node_modules/**",
     "**/dist/**",
