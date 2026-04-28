@@ -1,6 +1,12 @@
 const https = require("https");
 const http = require("http");
 
+const debug = (...args) => {
+  if (process.env.CONTEXTIFY_DEBUG === "true") {
+    console.error("[contextify:llm]", ...args);
+  }
+};
+
 /**
  * Call an LLM provider with the given prompt.
  * Returns the generated text.
@@ -13,6 +19,7 @@ const http = require("http");
  *   ollama   - Local Ollama instance (free, runs on your machine)
  */
 async function callLLM(config, systemPrompt, userPrompt) {
+  debug(`provider=${config.provider} model=${config.model}`);
   switch (config.provider) {
     case "claude":
       return callClaude(config, systemPrompt, userPrompt);
@@ -235,7 +242,10 @@ async function callGemini(config, systemPrompt, userPrompt) {
  * Ollama local API (free, runs locally)
  */
 async function callOllama(config, systemPrompt, userPrompt) {
-  const url = new URL(config.ollama?.host || "http://localhost:11434");
+  const host = config.ollama?.host || "http://localhost:11434";
+  const url = new URL(host);
+
+  debug(`ollama host=${host} model=${config.model}`);
 
   const body = JSON.stringify({
     model: config.model,
@@ -261,18 +271,27 @@ async function callOllama(config, systemPrompt, userPrompt) {
         },
       },
       (res) => {
+        debug(`ollama response status=${res.statusCode}`);
         let chunks = "";
         res.on("data", (d) => (chunks += d));
         res.on("end", () => resolve(chunks));
       }
     );
 
-    req.on("error", reject);
+    req.on("error", (err) => {
+      debug(`ollama request error: ${err.message}`);
+      reject(err);
+    });
     req.write(body);
     req.end();
   });
 
+  debug(`ollama raw response: ${data.slice(0, 200)}`);
+
   const parsed = JSON.parse(data);
+  if (parsed.error) {
+    throw new Error(`Ollama error: ${parsed.error}`);
+  }
   return parsed.message?.content || "";
 }
 

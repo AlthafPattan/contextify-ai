@@ -5,6 +5,12 @@ const { smartDiff, getContextPath } = require('./smart-diff');
 const { callLLM } = require('../llm/provider');
 const { SYSTEM_PROMPT, buildUserPrompt } = require('../llm/prompts');
 
+const debug = (...args) => {
+  if (process.env.CONTEXTIFY_DEBUG === 'true') {
+    console.error('[contextify:generator]', ...args);
+  }
+};
+
 /**
  * Generate or update a .context.md file for a single source file.
  *
@@ -20,8 +26,10 @@ async function generateContext(filePath, config, options = {}) {
   const { developerInput = null, force = false, dryRun = false } = options;
 
   // Analyze the file
+  debug(`analyzing ${filePath}`);
   const analysis = analyzeFile(filePath);
   if (analysis.error) {
+    debug(`analysis error: ${analysis.error}`);
     return {
       file: filePath,
       action: 'error',
@@ -35,6 +43,7 @@ async function generateContext(filePath, config, options = {}) {
 
   if (!force && config.smartDiff) {
     diff = smartDiff(analysis, config);
+    debug(`smartDiff action=${diff.action} reason=${diff.reason || '-'}`);
 
     if (diff.action === 'no-change') {
       return {
@@ -84,10 +93,13 @@ async function generateContext(filePath, config, options = {}) {
   });
 
   // Call LLM
+  debug(`calling LLM for ${filePath}`);
   let contextContent;
   try {
     contextContent = await callLLM(config, SYSTEM_PROMPT, userPrompt);
+    debug(`LLM response length=${contextContent.length}`);
   } catch (err) {
+    debug(`LLM error: ${err.message}`);
     return {
       file: filePath,
       action: 'error',

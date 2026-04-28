@@ -237,6 +237,11 @@ async function setupGitHooks(root, mode) {
   const hookPath = path.join(hooksDir, hookType);
   const skipFlag = mode === "post-commit" ? "--post-commit" : "";
 
+  // Embed the node bin directory so the hook works in non-login shells
+  // (e.g. nvm-managed node is not on PATH when git runs hooks via /bin/sh)
+  const nodeBinDir = path.dirname(process.execPath);
+  const pathExport = `export PATH="${nodeBinDir}:$PATH"`;
+
   // Check for existing hook
   let existingContent = "";
   if (fs.existsSync(hookPath)) {
@@ -248,8 +253,8 @@ async function setupGitHooks(root, mode) {
   }
 
   const hookScript = existingContent
-    ? `${existingContent}\n\n# contextify-ai\nnpx contextify hook ${skipFlag} "$@"\n`
-    : `#!/bin/sh\n\n# contextify-ai\nnpx contextify hook ${skipFlag} "$@"\n`;
+    ? `${existingContent}\n\n# contextify-ai\n${pathExport}\nnpx contextify hook ${skipFlag} "$@"\n`
+    : `#!/bin/sh\n\n# contextify-ai\n${pathExport}\nnpx contextify hook ${skipFlag} "$@"\n`;
 
   fs.writeFileSync(hookPath, hookScript, { mode: 0o755 });
   console.log(chalk.green(`  ✓ Git ${hookType} hook installed`));
@@ -266,6 +271,7 @@ async function setupGitHooks(root, mode) {
     (prepareContent || "#!/bin/sh\n") +
     `
 # contextify-ai commit message tagging
+${pathExport}
 if [ -n "$CONTEXTIFY_TAG" ]; then
   COMMIT_MSG_FILE="$1"
   CURRENT_MSG=$(cat "$COMMIT_MSG_FILE")

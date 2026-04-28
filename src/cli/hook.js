@@ -14,6 +14,12 @@ const {
   getLastCommitMessage,
 } = require('../core/git');
 
+const debug = (...args) => {
+  if (process.env.CONTEXTIFY_DEBUG === 'true') {
+    console.error('[contextify:hook]', ...args);
+  }
+};
+
 /**
  * Main hook handler - called from git pre-commit or post-commit hook.
  */
@@ -28,6 +34,8 @@ async function hookHandler(options) {
 
   const config = await loadConfig();
   const isPostCommit = options.postCommit || config.mode === 'post-commit';
+
+  debug(`mode=${isPostCommit ? 'post-commit' : 'pre-commit'} provider=${config.provider} model=${config.model}`);
 
   try {
     if (isPostCommit) {
@@ -48,6 +56,9 @@ async function hookHandler(options) {
 async function handlePreCommit(config) {
   // Get staged files matching scope
   const stagedFiles = await getStagedFiles(config);
+
+  debug(`staged files matching scope: ${stagedFiles.length}`);
+  stagedFiles.forEach(f => debug(` • ${f}`));
 
   if (stagedFiles.length === 0) {
     return; // Nothing to do
