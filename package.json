@@ -1,7 +1,7 @@
 {
   "name": "contextify-ai",
   "author": "Althaf Pattan",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "AI-powered .context.md files, auto-generated at every commit. Contextify your codebase.",
   "main": "src/index.js",
   "bin": {
