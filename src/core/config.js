@@ -55,6 +55,9 @@ const DEFAULT_CONFIG = {
   ollama: {
     host: "http://localhost:11434",
   },
+
+  // Optional path to a custom system prompt file (relative to project root)
+  systemPrompt: null,
 };
 
 /**
@@ -151,6 +154,19 @@ async function loadConfig(projectRoot) {
   // Resolve include/exclude to absolute globs
   config._root = root;
 
+  // Load custom system prompt if specified
+  config._systemPrompt = null;
+  if (config.systemPrompt) {
+    const promptPath = path.resolve(root, config.systemPrompt);
+    if (path.relative(root, promptPath).startsWith('..')) {
+      console.warn(`[contextify] systemPrompt path escapes project root — ignoring: ${config.systemPrompt}`);
+    } else if (fs.existsSync(promptPath)) {
+      config._systemPrompt = fs.readFileSync(promptPath, 'utf-8').trim();
+    } else {
+      console.warn(`[contextify] systemPrompt file not found: ${promptPath}`);
+    }
+  }
+
   return config;
 }
 
@@ -183,6 +199,7 @@ function writeDefaultConfig(projectRoot, overrides = {}) {
       smartDiff: config.smartDiff,
       commitTags: config.commitTags,
       tools: config.tools,
+      systemPrompt: "",
     },
     null,
     2

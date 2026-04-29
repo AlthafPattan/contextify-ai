@@ -9,6 +9,7 @@ const { generateContext, generateBatch } = require('../core/generator');
 const { buildIndex } = require('../core/indexer');
 const {
   getStagedFiles,
+  getLastCommitFiles,
   stageContextFiles,
   tagCommitMessage,
   getLastCommitMessage,
@@ -241,7 +242,7 @@ async function handlePreCommit(config, options = {}) {
  */
 async function handlePostCommit(config) {
   const commitMessage = await getLastCommitMessage(config);
-  const stagedFiles = await getStagedFiles(config);
+  const stagedFiles = await getLastCommitFiles(config);
 
   if (stagedFiles.length === 0) return;
 

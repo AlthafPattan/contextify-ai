@@ -2,7 +2,7 @@ const chalk = require('chalk');
 const ora = require('ora');
 const path = require('path');
 const { loadConfig } = require('../core/config');
-const { generateContext, generateBatch } = require('../core/generator');
+const { generateBatch } = require('../core/generator');
 const { buildIndex } = require('../core/indexer');
 const { getAllScopedFiles } = require('../core/git');
 
@@ -17,7 +17,7 @@ const { getAllScopedFiles } = require('../core/git');
 async function regenCommand(files, options) {
   const config = await loadConfig();
   const root = config._root;
-  const concurrency = parseInt(options.concurrency) || config.concurrency;
+  const concurrency = parseInt(options.concurrency, 10) || config.concurrency;
   const message = options.message || null;
 
   // ── Resolve target files ───────────────────────
@@ -40,24 +40,32 @@ async function regenCommand(files, options) {
   console.log('');
 
   // ── Regenerate ─────────────────────────────────
-  const spinner = ora({
-    text: `Regenerating context files (0/${targetFiles.length})...`,
-  }).start();
-
-  let processed = 0;
   const allResults = [];
+  let processed = 0;
+  const total = targetFiles.length;
+  const startedAt = new Date();
+  const spinner = ora(`Processing 0/${total} files...`).start();
 
-  for (let i = 0; i < targetFiles.length; i += concurrency) {
-    const batch = targetFiles.slice(i, i + concurrency);
-    const batchResults = await generateBatch(batch, config, {
-      force: true,        // bypass smartDiff hash check
-      developerInput: message,
-      concurrency,
-    });
-    allResults.push(...batchResults);
-    processed += batch.length;
-    spinner.text = `Regenerating context files (${processed}/${targetFiles.length})...`;
-  }
+  await generateBatch(targetFiles, config, {
+    force: true,
+    developerInput: message,
+    concurrency,
+    onProgress: (result) => {
+      allResults.push(result);
+      processed++;
+      const rel = path.relative(root, result.file);
+      spinner.clear();
+      if (result.action === 'generated') {
+        console.log(chalk.green('  +') + chalk.dim(` ${rel}`));
+      } else if (result.action === 'updated') {
+        console.log(chalk.yellow('  ~') + chalk.dim(` ${rel}`));
+      } else if (result.action === 'error') {
+        console.log(chalk.red(`  ✗ ${rel}: ${result.message}`));
+      }
+      spinner.text = `Processing ${processed}/${total} files...`;
+      spinner.render();
+    },
+  });
 
   spinner.stop();
 
@@ -66,20 +74,10 @@ async function regenCommand(files, options) {
   const updated = allResults.filter(r => r.action === 'updated');
   const errors = allResults.filter(r => r.action === 'error');
 
-  if (generated.length > 0) {
-    console.log(chalk.green(`  ✓ ${generated.length} context file(s) generated`));
-    generated.forEach(r => console.log(chalk.dim(`    + ${path.relative(root, r.contextPath)}`)));
-  }
-
-  if (updated.length > 0) {
-    console.log(chalk.green(`  ✓ ${updated.length} context file(s) regenerated`));
-    updated.forEach(r => console.log(chalk.dim(`    ~ ${path.relative(root, r.contextPath)}`)));
-  }
-
-  if (errors.length > 0) {
-    console.log(chalk.red(`  ✗ ${errors.length} error(s)`));
-    errors.forEach(r => console.log(chalk.red(`    ${path.relative(root, r.file)}: ${r.message}`)));
-  }
+  console.log('');
+  if (generated.length > 0) console.log(chalk.green(`  ✓ ${generated.length} generated`));
+  if (updated.length > 0) console.log(chalk.green(`  ✓ ${updated.length} regenerated`));
+  if (errors.length > 0) console.log(chalk.red(`  ✗ ${errors.length} error(s)`));
 
   // ── Rebuild index ──────────────────────────────
   if (generated.length > 0 || updated.length > 0) {
@@ -89,6 +87,15 @@ async function regenCommand(files, options) {
     }
   }
 
+  const finishedAt = new Date();
+  const duration = finishedAt - startedAt;
+  const durationStr = duration < 60000
+    ? `${(duration / 1000).toFixed(1)}s`
+    : `${Math.floor(duration / 60000)}m ${Math.floor((duration % 60000) / 1000)}s`;
+
+  console.log('');
+  console.log(chalk.dim(`  Started  ${startedAt.toLocaleTimeString()}`));
+  console.log(chalk.dim(`  Finished ${finishedAt.toLocaleTimeString()}  (${durationStr})`));
   console.log('');
 }
 

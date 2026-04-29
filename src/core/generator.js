@@ -4,6 +4,7 @@ const { analyzeFile, structuralHash } = require('./analyzer');
 const { smartDiff, getContextPath } = require('./smart-diff');
 const { callLLM } = require('../llm/provider');
 const { SYSTEM_PROMPT, buildUserPrompt } = require('../llm/prompts');
+const { version } = require('../../package.json');
 
 const debug = (...args) => {
   if (process.env.CONTEXTIFY_DEBUG === 'true') {
@@ -80,23 +81,19 @@ async function generateContext(filePath, config, options = {}) {
     existingContext = fs.readFileSync(contextPath, 'utf-8');
   }
 
-  // Compute hash
-  const hash = structuralHash(analysis);
-
   // Build prompt
   const userPrompt = buildUserPrompt({
     analysis,
     sourceCode,
     developerInput,
     existingContext,
-    hash,
   });
 
   // Call LLM
   debug(`calling LLM for ${filePath}`);
   let contextContent;
   try {
-    contextContent = await callLLM(config, SYSTEM_PROMPT, userPrompt);
+    contextContent = await callLLM(config, config._systemPrompt || SYSTEM_PROMPT, userPrompt);
     debug(`LLM response length=${contextContent.length}`);
   } catch (err) {
     debug(`LLM error: ${err.message}`);
@@ -110,6 +107,17 @@ async function generateContext(filePath, config, options = {}) {
 
   // Clean up response - remove any markdown fencing the LLM might add around the whole response
   contextContent = cleanLLMResponse(contextContent);
+
+  // Prepend the auto-generated header (always present regardless of which prompt was used)
+  const hash = structuralHash(analysis);
+  const header = [
+    `<!-- @contextify-ai v${version} | auto-generated -->`,
+    `<!-- source: ${filePath} -->`,
+    `<!-- updated: ${new Date().toISOString()} -->`,
+    `<!-- structural_hash: ${hash} -->`,
+    '',
+  ].join('\n');
+  contextContent = header + contextContent;
 
   // Verify intent if developer provided input
   let intentWarning = null;
@@ -134,7 +142,7 @@ async function generateContext(filePath, config, options = {}) {
  * Process multiple files with concurrency control.
  */
 async function generateBatch(files, config, options = {}) {
-  const { concurrency = config.concurrency || 5 } = options;
+  const { concurrency = config.concurrency || 5, onProgress } = options;
   const results = [];
   const queue = [...files];
 
@@ -144,10 +152,10 @@ async function generateBatch(files, config, options = {}) {
       if (!file) break;
       const result = await generateContext(file, config, options);
       results.push(result);
+      if (onProgress) onProgress(result);
     }
   }
 
-  // Run workers in parallel
   const workers = Array.from(
     { length: Math.min(concurrency, queue.length) },
     () => worker()
@@ -158,24 +166,48 @@ async function generateBatch(files, config, options = {}) {
 }
 
 /**
- * Clean up LLM response - remove outer markdown fencing if present.
+ * Clean up LLM response.
+ *
+ * Handles three failure modes that occur together or independently:
+ *   1. Preamble text before the fence  ("Here is the updated file:\n```markdown")
+ *   2. Outer markdown fence wrapping   (```markdown ... ```)
+ *   3. Echoed auto-generated headers   (<!-- @contextify-ai ... --> lines)
+ *
+ * Strategy: if any code fence appears before the first `# ` heading, the
+ * response is wrapped — extract everything between that fence and the last
+ * closing fence. Then strip any echoed header lines.
  */
 function cleanLLMResponse(content) {
-  // Remove ```markdown ... ``` wrapping if the LLM added it
   let cleaned = content.trim();
-  if (cleaned.startsWith('```markdown')) {
-    cleaned = cleaned.slice('```markdown'.length);
-  } else if (cleaned.startsWith('```md')) {
-    cleaned = cleaned.slice('```md'.length);
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.slice(3);
+
+  // Locate the title line (# ComponentName) — the true start of the content.
+  let titleStart;
+  if (cleaned.startsWith('# ')) {
+    titleStart = 0;
+  } else {
+    const idx = cleaned.indexOf('\n# ');
+    titleStart = idx !== -1 ? idx + 1 : Infinity;
   }
 
-  if (cleaned.endsWith('```')) {
-    cleaned = cleaned.slice(0, -3);
+  // Locate the first code fence in the response.
+  const firstFence = cleaned.search(/```[a-zA-Z]*/);
+
+  // If a fence appears before the title the LLM wrapped its output (case 1+2).
+  // Extract everything between the opening fence line and the last closing fence.
+  if (firstFence !== -1 && firstFence < titleStart) {
+    const openFenceEnd = cleaned.indexOf('\n', firstFence) + 1;
+    const afterOpen = cleaned.slice(openFenceEnd);
+    const lastFence = afterOpen.lastIndexOf('\n```');
+    cleaned = (lastFence !== -1 ? afterOpen.slice(0, lastFence) : afterOpen).trim();
   }
 
-  return cleaned.trim() + '\n';
+  // Strip echoed auto-generated header lines (case 3).
+  // The generator re-adds these itself, so any copy in the LLM output is a duplicate.
+  cleaned = cleaned
+    .replace(/^(<!--\s*@contextify-ai[^\n]*-->\r?\n|<!--\s*(?:source|updated|structural_hash):[^\n]*-->\r?\n)+/, '')
+    .trim();
+
+  return cleaned + '\n';
 }
 
 /**

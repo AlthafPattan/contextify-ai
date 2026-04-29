@@ -73,6 +73,9 @@ async function callClaude(config, systemPrompt, userPrompt) {
   if (parsed.error) {
     throw new Error(`Claude API error: ${parsed.error.message}`);
   }
+  if (!Array.isArray(parsed.content)) {
+    throw new Error(`Claude API returned unexpected response: ${JSON.stringify(parsed).slice(0, 200)}`);
+  }
 
   return parsed.content
     .filter((c) => c.type === "text")
@@ -115,6 +118,9 @@ async function callOpenAI(config, systemPrompt, userPrompt) {
   const parsed = JSON.parse(data);
   if (parsed.error) {
     throw new Error(`OpenAI API error: ${parsed.error.message}`);
+  }
+  if (!parsed.choices?.[0]?.message?.content) {
+    throw new Error(`OpenAI API returned unexpected response: ${JSON.stringify(parsed).slice(0, 200)}`);
   }
 
   return parsed.choices[0].message.content;
@@ -169,6 +175,9 @@ async function callGitHub(config, systemPrompt, userPrompt) {
   const parsed = JSON.parse(data);
   if (parsed.error) {
     throw new Error(`GitHub Models API error: ${parsed.error.message}`);
+  }
+  if (!parsed.choices?.[0]?.message?.content) {
+    throw new Error(`GitHub Models API returned unexpected response: ${JSON.stringify(parsed).slice(0, 200)}`);
   }
 
   return parsed.choices[0].message.content;
@@ -232,6 +241,10 @@ async function callGemini(config, systemPrompt, userPrompt) {
     throw new Error("Gemini returned no candidates");
   }
 
+  if (!Array.isArray(candidates[0]?.content?.parts)) {
+    throw new Error(`Gemini API returned unexpected response: ${JSON.stringify(parsed).slice(0, 200)}`);
+  }
+
   return candidates[0].content.parts
     .filter((p) => p.text)
     .map((p) => p.text)
@@ -281,6 +294,9 @@ async function callOllama(config, systemPrompt, userPrompt) {
     req.on("error", (err) => {
       debug(`ollama request error: ${err.message}`);
       reject(err);
+    });
+    req.setTimeout(120000, () => {
+      req.destroy(new Error("Ollama request timed out after 120s"));
     });
     req.write(body);
     req.end();

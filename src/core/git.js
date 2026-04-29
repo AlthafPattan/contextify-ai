@@ -90,6 +90,22 @@ async function getLastCommitMessage(config) {
 }
 
 /**
+ * Get files changed in the last commit (for post-commit mode).
+ * git.status() shows staged/unstaged — after a commit those are empty.
+ * This reads the actual HEAD commit diff instead.
+ */
+async function getLastCommitFiles(config) {
+  const git = simpleGit(config._root);
+  const result = await git.raw(['diff', '--name-only', 'HEAD~1', 'HEAD']);
+  const files = result
+    .split('\n')
+    .map(f => f.trim())
+    .filter(Boolean)
+    .map(f => path.resolve(config._root, f));
+  return filterByScope(files, config);
+}
+
+/**
  * Get all files in the project matching the configured scope.
  * Used for bulk generation during init.
  */
@@ -111,6 +127,7 @@ async function getAllScopedFiles(config) {
 
 module.exports = {
   getStagedFiles,
+  getLastCommitFiles,
   filterByScope,
   stageContextFiles,
   tagCommitMessage,
