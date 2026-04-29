@@ -3,7 +3,7 @@ const inquirer = require("inquirer");
 const ora = require("ora");
 const fs = require("fs");
 const path = require("path");
-const { writeDefaultConfig, getDefaultModel } = require("../core/config");
+const { writeDefaultConfig, getDefaultModel, DEFAULT_CONFIG } = require("../core/config");
 const { getAllScopedFiles } = require("../core/git");
 const { loadConfig } = require("../core/config");
 const { generateBatch } = require("../core/generator");
@@ -22,26 +22,74 @@ async function initCommand(options) {
   console.log("");
 
   // ── Check for existing config ─────────────────
-  const existingConfig = [
+  const existingConfigFile = [
     ".contextifyrc",
-    "contextify.config.js",
     ".contextifyrc.json",
+    "contextify.config.js",
   ].find((f) => fs.existsSync(path.join(root, f)));
 
-  if (existingConfig) {
-    const { overwrite } = await inquirer.prompt([
+  if (existingConfigFile) {
+    const { action } = await inquirer.prompt([
       {
-        type: "confirm",
-        name: "overwrite",
-        message: `Found existing ${existingConfig}. Overwrite?`,
-        default: false,
+        type: "list",
+        name: "action",
+        message: `Found existing ${existingConfigFile}. What would you like to do?`,
+        choices: [
+          { name: "Update (keep your settings, add any new fields)", value: "update" },
+          { name: "Reconfigure (run full setup wizard)", value: "overwrite" },
+          { name: "Keep as-is", value: "skip" },
+        ],
+        default: "update",
       },
     ]);
 
-    if (!overwrite) {
+    if (action === "skip") {
       console.log(chalk.dim("  Keeping existing config.\n"));
       return;
     }
+
+    if (action === "update") {
+      const existingPath = path.join(root, existingConfigFile);
+      let existingData = {};
+      try {
+        existingData = JSON.parse(fs.readFileSync(existingPath, "utf-8"));
+      } catch {
+        console.log(chalk.yellow(`  ⚠ Could not parse ${existingConfigFile}. Use Reconfigure to reset it.`));
+        return;
+      }
+
+      // Fields written by writeDefaultConfig — the canonical schema
+      const schema = {
+        provider: DEFAULT_CONFIG.provider,
+        model: DEFAULT_CONFIG.model,
+        mode: DEFAULT_CONFIG.mode,
+        include: DEFAULT_CONFIG.include,
+        exclude: DEFAULT_CONFIG.exclude,
+        output: DEFAULT_CONFIG.output,
+        concurrency: DEFAULT_CONFIG.concurrency,
+        smartDiff: DEFAULT_CONFIG.smartDiff,
+        commitTags: DEFAULT_CONFIG.commitTags,
+        tools: DEFAULT_CONFIG.tools,
+        systemPrompt: "",
+      };
+
+      const addedKeys = Object.keys(schema).filter((k) => !(k in existingData));
+
+      // Merge: existing values take precedence, missing fields get defaults
+      const merged = { ...schema, ...existingData };
+      merged.tools = { ...schema.tools, ...(existingData.tools || {}) };
+
+      fs.writeFileSync(existingPath, JSON.stringify(merged, null, 2), "utf-8");
+
+      if (addedKeys.length > 0) {
+        console.log(chalk.green(`  ✓ Added new fields: ${addedKeys.join(", ")}`));
+      } else {
+        console.log(chalk.dim("  Config is already up to date."));
+      }
+      return;
+    }
+
+    // action === "overwrite": fall through to full wizard
   }
 
   // ── Provider selection ────────────────────────
@@ -426,28 +474,34 @@ async function bulkGenerate(root) {
   console.log(chalk.dim(`  Estimated LLM calls: ${files.length}`));
   console.log(chalk.dim(`  Concurrency: ${config.concurrency}\n`));
 
-  const spinner = ora({
-    text: `Processing 0/${files.length} files...`,
-  }).start();
-
-  let processed = 0;
   const results = [];
+  let processed = 0;
+  const total = files.length;
+  const startedAt = new Date();
+  const spinner = ora(`Processing 0/${total} files...`).start();
 
-  // Process in batches
-  const batchSize = config.concurrency;
-  for (let i = 0; i < files.length; i += batchSize) {
-    const batch = files.slice(i, i + batchSize);
-    const batchResults = await generateBatch(batch, config, {
-      concurrency: batchSize,
-    });
-    results.push(...batchResults);
-    processed += batch.length;
-    spinner.text = `Processing ${processed}/${files.length} files...`;
-  }
+  await generateBatch(files, config, {
+    concurrency: config.concurrency,
+    onProgress: (result) => {
+      results.push(result);
+      processed++;
+      const rel = path.relative(root, result.file);
+      spinner.clear();
+      if (result.action === "generated") {
+        console.log(chalk.green("  +") + chalk.dim(` ${rel}`));
+      } else if (result.action === "updated") {
+        console.log(chalk.yellow("  ~") + chalk.dim(` ${rel}`));
+      } else if (result.action === "error") {
+        console.log(chalk.red(`  ✗ ${rel}: ${result.message}`));
+      }
+      spinner.text = `Processing ${processed}/${total} files...`;
+      spinner.render();
+    },
+  });
 
-  spinner.succeed(`Processed ${files.length} files`);
+  spinner.stop();
 
-  // Summary
+  console.log("");
   const generated = results.filter((r) => r.action === "generated").length;
   const errors = results.filter((r) => r.action === "error").length;
 
@@ -465,6 +519,16 @@ async function bulkGenerate(root) {
       )
     );
   }
+
+  const finishedAt = new Date();
+  const duration = finishedAt - startedAt;
+  const durationStr = duration < 60000
+    ? `${(duration / 1000).toFixed(1)}s`
+    : `${Math.floor(duration / 60000)}m ${Math.floor((duration % 60000) / 1000)}s`;
+
+  console.log("");
+  console.log(chalk.dim(`  Started  ${startedAt.toLocaleTimeString()}`));
+  console.log(chalk.dim(`  Finished ${finishedAt.toLocaleTimeString()}  (${durationStr})`));
 }
 
 module.exports = { initCommand };
